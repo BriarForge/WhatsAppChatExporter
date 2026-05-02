@@ -4,6 +4,7 @@ import logging
 import sqlite3
 import os
 import shutil
+from html import unescape
 from tqdm import tqdm
 from pathlib import Path
 from mimetypes import MimeTypes
@@ -1231,6 +1232,115 @@ def create_txt(data, output):
                 # Format the message
                 formatted_message = _format_message_for_txt(message, contact)
                 f.write(f"{formatted_message}\n")
+
+
+def create_markdown(data, output):
+    """Generate a GitHub-friendly Markdown repo export from chat data."""
+    output_path = Path(output)
+    chats_path = output_path / "chats"
+    assets_path = output_path / "assets"
+    chats_path.mkdir(parents=True, exist_ok=True)
+    assets_path.mkdir(parents=True, exist_ok=True)
+
+    index_entries = []
+    total = len(data.keys())
+    with tqdm(total=total, desc="Generating Markdown files", unit="file", leave=False) as pbar:
+        for jik, chat in data.items():
+            if len(chat) == 0:
+                pbar.update(1)
+                continue
+
+            title = _markdown_chat_title(jik, chat)
+            file_stem = safe_name(title.replace('/', ''))
+            chat_file = chats_path / f"{file_stem}.md"
+            chat_asset_path = assets_path / file_stem
+            chat_asset_path.mkdir(parents=True, exist_ok=True)
+
+            index_entries.append((title, f"chats/{chat_file.name}"))
+            with chat_file.open("w", encoding="utf8") as f:
+                f.write(f"# {title}\n\n")
+                f.write(f"**{jik}**\n\n")
+                for message in chat.values():
+                    if message.meta and message.mime != "media":
+                        continue
+                    f.write(_format_message_for_markdown(message, title, chat_asset_path, chat_file.parent))
+                    f.write("\n\n")
+            pbar.update(1)
+        total_time = pbar.format_dict['elapsed']
+
+    with (output_path / "README.md").open("w", encoding="utf8") as f:
+        f.write("# WhatsApp Chat Export\n\n")
+        f.write("Markdown files in this folder are ready to commit to GitHub. Media files are stored under `assets/` and linked with repository-relative paths.\n\n")
+        f.write("## Chats\n\n")
+        for title, link in index_entries:
+            f.write(f"- [{_escape_markdown_link_text(title)}]({link})\n")
+    logging.info(f"Generated {len(index_entries)} Markdown files in {convert_time_unit(total_time)}")
+
+
+def _markdown_chat_title(jik, chat):
+    if chat.name is not None:
+        return chat.name
+    return jik
+
+
+def _format_message_for_markdown(message, contact, asset_output, chat_output):
+    date = datetime.fromtimestamp(message.timestamp).date()
+    name = "You" if message.from_me else (message.sender if message.sender else contact)
+    header = f"### {date} {message.time} — {name}\n\n"
+
+    if message.media and ("/" in str(message.mime) or message.mime == "media"):
+        body = _format_media_for_markdown(message, asset_output, chat_output)
+    else:
+        body = _normalise_markdown_text(message.data)
+
+    if message.caption is not None:
+        caption = _normalise_markdown_text(message.caption)
+        body = f"{body}\n\n{caption}" if body else caption
+
+    return f"{header}{body}".rstrip()
+
+
+def _format_media_for_markdown(message, asset_output, chat_output):
+    if message.data == "The media is missing":
+        return "*The media is missing.*"
+
+    source = Path(str(message.data))
+    if not source.is_file():
+        return f"*Media file: `{message.data}`*"
+
+    destination = _unique_asset_path(asset_output, source.name)
+    shutil.copy2(source, destination)
+    relative_path = os.path.relpath(destination, chat_output).replace(os.sep, '/')
+    alt_text = _escape_markdown_link_text(message.caption or source.stem)
+
+    if str(message.mime).startswith("image/"):
+        return f"![{alt_text}]({relative_path})"
+    return f"[{alt_text}]({relative_path})"
+
+
+def _unique_asset_path(directory, filename):
+    candidate = directory / safe_name(filename)
+    if not candidate.exists():
+        return candidate
+
+    stem = candidate.stem
+    suffix = candidate.suffix
+    counter = 2
+    while True:
+        candidate = directory / f"{stem}-{counter}{suffix}"
+        if not candidate.exists():
+            return candidate
+        counter += 1
+
+
+def _normalise_markdown_text(value):
+    if value is None:
+        return ""
+    return unescape(str(value)).replace('<br>', '\n')
+
+
+def _escape_markdown_link_text(value):
+    return str(value).replace('\\', '\\\\').replace('[', '\\[').replace(']', '\\]')
 
 
 def _format_message_for_txt(message, contact):

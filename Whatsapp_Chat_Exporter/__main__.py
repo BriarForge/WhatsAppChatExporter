@@ -124,6 +124,10 @@ def setup_argument_parser() -> ArgumentParser:
         help="Export chats in text format similar to what WhatsApp officially provided (default if present: result/)"
     )
     output_group.add_argument(
+        "--md", "--markdown", dest="markdown", nargs='?', default=None, type=str, const="markdown-export",
+        help="Export chats as a GitHub-ready Markdown repository folder with linked media (default if present: markdown-export/)"
+    )
+    output_group.add_argument(
         "--no-html", dest="no_html", default=False, action='store_true',
         help="Do not output html files"
     )
@@ -313,9 +317,9 @@ def validate_args(parser: ArgumentParser, args) -> None:
         parser.error("You must define only one device type.")
     if not args.android and not args.ios and not args.exported and not args.import_json:
         parser.error("You must define the device type.")
-    if args.no_html and not args.json and not args.text_format:
+    if args.no_html and not args.json and not args.text_format and not args.markdown:
         parser.error(
-            "You must either specify a JSON output file, text file output directory or enable HTML output.")
+            "You must either specify a JSON output file, text file output directory, Markdown output directory or enable HTML output.")
     if args.import_json and (args.android or args.ios or args.exported or args.no_html):
         parser.error(
             "You can only use --import with -j and without --no-html, -a, -i, -e.")
@@ -637,6 +641,11 @@ def create_output_files(args, data: ChatCollection) -> None:
         logging.info(f"Writing text file...")
         android_handler.create_txt(data, args.text_format)
 
+    # Create Markdown files if requested
+    if args.markdown:
+        logging.info(f"Writing Markdown files...")
+        android_handler.create_markdown(data, args.markdown)
+
     # Create JSON files if requested
     if args.json and not args.import_json:
         export_json(args, data)
@@ -719,6 +728,9 @@ def process_exported_chat(args, data: ChatCollection) -> None:
             args.telegram_theme,
             args.headline
         )
+
+    if args.markdown:
+        android_handler.create_markdown(data, args.markdown)
 
     # Copy files to output directory
     for file in glob.glob(r'*.*'):
