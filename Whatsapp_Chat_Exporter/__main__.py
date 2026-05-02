@@ -8,6 +8,7 @@ import json
 import string
 import glob
 import logging
+import sys
 import importlib.metadata
 from Whatsapp_Chat_Exporter import android_crypt, exported_handler, android_handler
 from Whatsapp_Chat_Exporter import ios_handler, ios_media_handler
@@ -24,6 +25,14 @@ from tqdm import tqdm
 from sys import exit
 from typing import Optional, List, Dict
 from Whatsapp_Chat_Exporter.vcards_contacts import ContactsFromVCards
+
+AGENT_CONSOLE_COMMANDS = [
+    "wtsexporter",
+    "waexporter",
+    "whatsapp-chat-exporter",
+    "openclaw-whatsapp-exporter",
+    "hermes-whatsapp-exporter",
+]
 
 
 __version__ = importlib.metadata.version("whatsapp_chat_exporter")
@@ -61,6 +70,10 @@ def setup_argument_parser() -> ArgumentParser:
     parser.add_argument(
         "--debug", dest="debug", default=False, action='store_true',
         help="Enable debug mode"
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"whatsapp-chat-exporter {__version__}",
+        help="Show the package version and exit"
     )
     # Device type arguments
     device_group = parser.add_argument_group('Device Type')
@@ -313,9 +326,10 @@ def setup_argument_parser() -> ArgumentParser:
 def validate_args(parser: ArgumentParser, args) -> None:
     """Validate command line arguments and modify them if needed."""
     # Basic validation checks
-    if args.android and args.ios and args.exported and args.import_json:
+    selected_device_modes = sum(bool(mode) for mode in (args.android, args.ios, args.exported, args.import_json))
+    if selected_device_modes > 1:
         parser.error("You must define only one device type.")
-    if not args.android and not args.ios and not args.exported and not args.import_json:
+    if selected_device_modes == 0:
         parser.error("You must define the device type.")
     if args.no_html and not args.json and not args.text_format and not args.markdown:
         parser.error(
@@ -737,6 +751,69 @@ def process_exported_chat(args, data: ChatCollection) -> None:
         shutil.copy(file, args.output)
 
 
+def create_agent_manifest() -> Dict:
+    """Return the machine-readable OpenClaw/Hermes CLI manifest."""
+    return {
+        "schema": "dev.openclaw.cli-manifest.v1",
+        "name": "whatsapp-chat-exporter",
+        "version": __version__,
+        "description": "Headless Android, iOS, iPadOS, and exported-file WhatsApp chat exporter.",
+        "commands": AGENT_CONSOLE_COMMANDS,
+        "entrypoints": {
+            "default": "whatsapp-chat-exporter",
+            "openclaw": "openclaw-whatsapp-exporter",
+            "hermes": "hermes-whatsapp-exporter",
+        },
+        "agent_commands": {
+            "manifest": ["openclaw", "manifest", "--json"],
+            "hermes_manifest": ["hermes", "manifest", "--json"],
+            "version": ["--version"],
+            "help": ["--help"],
+        },
+        "capabilities": {
+            "android_export": True,
+            "ios_export": True,
+            "exported_chat_import": True,
+            "html_export": True,
+            "json_export": True,
+            "github_markdown_export": True,
+            "incremental_merge": True,
+        },
+        "automation": {
+            "non_interactive_flags": ["--no-banner"],
+            "machine_readable_outputs": ["--json", "--per-chat", "--tg", "--md"],
+            "network_side_effect_flags": ["--check-update", "--check-update-pre"],
+            "prompting_flags": ["--key without a value for crypt15 backups"],
+            "recommended_markdown_export": ["--no-banner", "--no-html", "--md", "<repo-folder>"],
+        },
+        "docs": [
+            "AGENTS.md",
+            "CLAUDE.md",
+            ".ai/instructions.md",
+            "developers/guidelines/CLI.md",
+            "developers/guidelines/AGENT_WORKFLOW.md",
+        ],
+    }
+
+
+def handle_agent_command(argv: Optional[List[str]]) -> bool:
+    """Handle first-party OpenClaw/Hermes agent commands before normal parsing."""
+    if argv is None:
+        return False
+    if len(argv) < 2 or argv[0] not in ("openclaw", "hermes") or argv[1] != "manifest":
+        return False
+
+    manifest = create_agent_manifest()
+    if "--json" in argv[2:]:
+        print(json.dumps(manifest, indent=2, sort_keys=True))
+    else:
+        print("WhatsApp Chat Exporter agent manifest")
+        print(f"Version: {manifest['version']}")
+        print("Commands: " + ", ".join(manifest["commands"]))
+        print("Use --json for the machine-readable OpenClaw/Hermes contract.")
+    return True
+
+
 class ClearLineFilter(logging.Filter):
     def filter(self, record):
         is_clear = getattr(record, 'clear', False)
@@ -771,11 +848,15 @@ def setup_logging(level):
     )
 
 
-def main():
+def main(argv: Optional[List[str]] = None):
     """Main function to run the WhatsApp Chat Exporter."""
+    cli_args = sys.argv[1:] if argv is None else argv
+    if handle_agent_command(cli_args):
+        return
+
     # Set up and parse arguments
     parser = setup_argument_parser()
-    args = parser.parse_args()
+    args = parser.parse_args(cli_args)
 
     # Print banner if not suppressed
     if not args.no_banner:

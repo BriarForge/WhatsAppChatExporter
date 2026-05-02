@@ -31,6 +31,34 @@ mkdir working_wts
 cd working_wts
 ```
 
+## Automation, OpenClaw, and Hermes
+
+The package is ready for headless agent usage via these first-party CLI entry points:
+
+```shell
+wtsexporter
+waexporter
+whatsapp-chat-exporter
+openclaw-whatsapp-exporter
+hermes-whatsapp-exporter
+```
+
+OpenClaw and Hermes agents can discover the machine-readable CLI contract without parsing human help text:
+
+```shell
+whatsapp-chat-exporter openclaw manifest --json
+whatsapp-chat-exporter hermes manifest --json
+```
+
+For unattended runs, prefer explicit paths and `--no-banner`:
+
+```shell
+whatsapp-chat-exporter --no-banner -i -b "$BACKUP" --no-html --md github-export
+```
+
+Avoid `--check-update` unless network access is intended. For crypt15 backups, provide a key value explicitly because `--key` without a value may prompt interactively.
+
+
 > [!TIP]
 > macOS users should grant *Full Disk Access* to Terminal in the *Security & Privacy* settings before using the exporter.
 
